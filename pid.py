@@ -58,7 +58,8 @@ class PIDOptimizer(Optimizer):
         self.weight_layer = dict()
 
         for idx, (key, param) in enumerate(model.named_parameters()):
-            self.weight_layer_lr[key.replace(".", "-")] = nn.Parameter(data=torch.tensor(self.param_groups[0]['lr']), requires_grad=False)
+            # 每一层设置不同的学习率, 甚至可以设为每一层的学习率 可以自己学习
+            self.weight_layer_lr[key.replace(".", "-")] = nn.Parameter(data=torch.tensor(self.param_groups[0]['lr'] * torch.exp(torch.tensor(-idx))), requires_grad=False)
             self.weight_layer[key.replace(".", "-")] = self.param_groups[0]['params'][idx]
 
     def __setstate__(self, state):
@@ -123,8 +124,14 @@ class PIDOptimizer(Optimizer):
                         D_buf.mul_(momentum).add_(1 - momentum, p_grad - g_buf)  # D_buf * momentum + (1 - momentum) * (p_grad - g_buf)
                         self.state[p]['grad_buffer'] = p_grad.clone()            # 对于下次来说，这次的梯度就是上一次的梯度(历史梯度)
 
-                    p_grad = p_grad.add_(I, I_buf).add_(D, D_buf) # p_grad = p_grad + I * I_buf + D * D_buf
+                    # p_grad = p_grad + I * I_buf + D * D_buf
+                    p_grad = p_grad.add_(I, I_buf).add_(D, D_buf)
+
                 # p.data.add_(-group['lr'], p_grad)  # 参数更新， -lr * p_grad
                 p.data.add_(-self.weight_layer_lr[key], p_grad)  # 参数更新， -lr * p_grad
+                # p.data = p.data - self.weight_layer_lr[key] * p_grad # .add_(-self.weight_layer_lr[key], p_grad)
+
+        # tot_lr = [self.weight_layer_lr[key] for key, _ in self.weight_layer.items()]
+        # print(tot_lr)
 
         return loss

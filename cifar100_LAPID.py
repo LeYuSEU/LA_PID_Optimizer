@@ -26,7 +26,6 @@ if __name__ == '__main__':
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
 
-
     class Net(nn.Module):
         def __init__(self, num_class=10):
             super(Net, self).__init__()
