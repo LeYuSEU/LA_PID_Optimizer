@@ -68,7 +68,7 @@ class PIDOptimizer(Optimizer):
         for group in self.param_groups:
             group.setdefault('nesterov', False)
 
-    def step(self, closure=None):
+    def step(self, closure=None, gen_I=None, gen_D=None):
         """
             Performs a single optimization step.
             Arguments:
@@ -125,7 +125,8 @@ class PIDOptimizer(Optimizer):
                         self.state[p]['grad_buffer'] = p_grad.clone()            # 对于下次来说，这次的梯度就是上一次的梯度(历史梯度)
 
                     # p_grad = p_grad + I * I_buf + D * D_buf
-                    p_grad = p_grad.add_(I, I_buf).add_(D, D_buf)
+                    # p_grad = p_grad.add_(I, I_buf).add_(D, D_buf)
+                    p_grad = p_grad + gen_I[key] * I_buf + gen_D[key] * D_buf
 
                 # p.data.add_(-group['lr'], p_grad)  # 参数更新， -lr * p_grad
                 p.data.add_(-self.weight_layer_lr[key], p_grad)  # 参数更新， -lr * p_grad
