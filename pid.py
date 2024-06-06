@@ -8,42 +8,6 @@ import torch.nn as nn
 
 
 class PIDOptimizer(Optimizer):
-    r"""
-        Implements stochastic gradient descent (optionally with momentum).
-        Nesterov momentum is based on the formula from
-        `On the importance of initialization and momentum in deep learning`.
-
-        Args:
-            params (iterable): iterable of parameters to optimize or dicts defining
-                parameter groups
-            lr (float): learning rate
-            momentum (float, optional): momentum factor (default: 0)
-            weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-            dampening (float, optional): dampening for momentum (default: 0)
-            nesterov (bool, optional): enables Nesterov momentum (default: False)
-        Example:
-            >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-            >>> optimizer.zero_grad()
-            >>> loss_fn(model(input), target).backward()
-            >>> optimizer.step()
-        __ http://www.cs.toronto.edu/%7Ehinton/absps/momentum.pdf
-        .. note::
-            The implementation of SGD with Momentum/Nesterov subtly differs from
-            Sutskever et. al. and implementations in some other frameworks.
-            Considering the specific case of Momentum, the update can be written as
-            .. math::
-                      v = \rho * v + g \\
-                      p = p - lr * v
-            where p, g, v and :math:`\rho` denote the parameters, gradient,
-            velocity, and momentum respectively.
-            This is in contrast to Sutskever et. al. and
-            other frameworks which employ an update of the form
-            .. math::
-                 v = \rho * v + lr * g \\
-                 p = p - v
-            The Nesterov version is analogously modified.
-    """
-
     def __init__(self, params, lr=required, momentum=0, dampening=0, weight_decay=0, nesterov=False, I=5., D=10.):
         # 这些变量将自动保存到 self.param_groups 中
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening, weight_decay=weight_decay, nesterov=nesterov, I=I, D=D)
@@ -60,6 +24,7 @@ class PIDOptimizer(Optimizer):
         for idx, (key, param) in enumerate(model.named_parameters()):
             # 每一层设置不同的学习率, 甚至可以设为每一层的学习率 可以自己学习
             self.weight_layer_lr[key.replace(".", "-")] = nn.Parameter(data=torch.tensor(self.param_groups[0]['lr'] * torch.exp(torch.tensor(-idx))), requires_grad=False)
+            # 记录模型的每一层名称
             self.weight_layer[key.replace(".", "-")] = self.param_groups[0]['params'][idx]
 
     def __setstate__(self, state):
@@ -125,13 +90,24 @@ class PIDOptimizer(Optimizer):
                         self.state[p]['grad_buffer'] = p_grad.clone()            # 对于下次来说，这次的梯度就是上一次的梯度(历史梯度)
 
                     # p_grad = p_grad + I * I_buf + D * D_buf
-                    # p_grad = p_grad.add_(I, I_buf).add_(D, D_buf)
-                    p_grad = p_grad + gen_I[key] * I_buf + gen_D[key] * D_buf
+                    # p_grad = p_grad.add_(I, I_buf).add_(D, D_buf)     # PID系数手动设置
+                    p_grad = p_grad + gen_I[key] * I_buf + gen_D[key] * D_buf  # 每层的PID系数自动生成
 
-                # p.data.add_(-group['lr'], p_grad)  # 参数更新， -lr * p_grad
-                p.data.add_(-self.weight_layer_lr[key], p_grad)  # 参数更新， -lr * p_grad
-                # p.data = p.data - self.weight_layer_lr[key] * p_grad # .add_(-self.weight_layer_lr[key], p_grad)
+                # p.data.add_(-group['lr'], p_grad)  # 使用统一的学习率参数更新， -lr * p_grad
+                p.data.add_(-self.weight_layer_lr[key], p_grad)  # 参数更新，每一层的学习率不一样
+                # p.data = p.data - self.weight_layer_lr[key] * p_grad  # .add_(-self.weight_layer_lr[key], p_grad)
+            # break
+        # --------------------------------------------------------------------------------------------------------------------
+        # for p in group['params']:  # p 是各个层的参数 即theta
+        # if p.grad is None:
+        #     continue
 
+        # p_grad = p.grad.data
+        # if weight_decay != 0:  # p_grad 是梯度，p是可学习参数
+        #     p_grad.add_(weight_decay, p.data)  # 正则化, p_grad = p_grad + weight_decay * p
+        #
+        # if momentum != 0:
+        #     param_state = self.state[p]
         # tot_lr = [self.weight_layer_lr[key] for key, _ in self.weight_layer.items()]
         # print(tot_lr)
 

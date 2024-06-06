@@ -12,6 +12,7 @@ from pid import PIDOptimizer
 from utils import Bar, Logger, AverageMeter, accuracy, mkdir_p, savefig
 import torch.nn.functional as F
 from config import I, D, batch_size, learning_rate, hidden_size, num_classes, num_epochs, input_size
+from torchviz import make_dot
 
 
 save_file = f'./result/PID_params/mnist_PID I={I} D={D} lr={learning_rate}.txt'
@@ -52,11 +53,28 @@ if __name__ == '__main__':
     hidden_dim = num_layers * 3
     output_dim = num_layers * 2
 
-    KIKD_Gen_Net = nn.Sequential(
-        nn.Linear(input_dim, hidden_dim), nn.ReLU(inplace=True),
-        nn.Linear(hidden_dim, output_dim), nn.ReLU(inplace=True)
-    ).to('cuda')
-    Gen_net_optimizer = torch.optim.SGD(KIKD_Gen_Net.parameters(), lr=0.01)
+    class Gen_Net_PID(nn.Module):
+        def __init__(self, input_d, hidden_d, output_d):
+            super(Gen_Net_PID, self).__init__()
+
+            self.gen_fc1 = nn.Linear(input_d, hidden_d)
+            self.gen_fc2 = nn.Linear(hidden_d, output_d)
+
+        def forward(self, x):
+            x = self.gen_fc1(x)
+            x = nn.ReLU(inplace=True)(x)
+            x = self.gen_fc2(x)
+            x = nn.ReLU(inplace=True)(x)
+
+            return x
+
+    # KIKD_Gen_Net = nn.Sequential(
+    #     nn.Linear(input_dim, hidden_dim), nn.ReLU(inplace=True),
+    #     nn.Linear(hidden_dim, output_dim), nn.ReLU(inplace=True)
+    # ).to('cuda')
+    KIKD_Gen_Net = Gen_Net_PID(input_dim, hidden_dim, output_dim).cuda()
+
+    # Gen_net_optimizer = torch.optim.SGD(KIKD_Gen_Net.parameters(), lr=0.1)
 
     # ==========================================================
 
@@ -70,7 +88,10 @@ if __name__ == '__main__':
     # 获取模型参数名称与层名称的对应关系
     # param_names_to_layers = {param_name: module_name for param_name, module_name in net.named_parameters()}
 
-    optimizer = PIDOptimizer(net.parameters(), lr=learning_rate, weight_decay=0.0001, momentum=0.9, I=I, D=D)
+    optimizer = PIDOptimizer([{'params': net.parameters()},
+                                    {'params': KIKD_Gen_Net.parameters()}],
+                             lr=learning_rate, weight_decay=0.0001, momentum=0.9, I=I, D=D)
+
     optimizer.InitWeightsWith_Lr(net)
 
     generated_I_params = {}
@@ -88,7 +109,7 @@ if __name__ == '__main__':
             labels = Variable(labels.cuda())
 
             optimizer.zero_grad()
-            Gen_net_optimizer.zero_grad()
+            # Gen_net_optimizer.zero_grad()
             outputs = net(images)
             train_loss = criterion(outputs, labels)
 
@@ -105,8 +126,10 @@ if __name__ == '__main__':
             per_layer_representation = torch.stack(per_layer_representation)
             generated_KI_KD = KIKD_Gen_Net(per_layer_representation)
             generated_I, generated_D = torch.split(generated_KI_KD, split_size_or_sections=num_layers)
-            index = 0
 
+            gen_loss = torch.sum(generated_KI_KD ** 2)
+
+            index = 0
             for key, _ in net.named_parameters():
                 generated_I_params[key.replace(".", "-")] = generated_I[index]
                 generated_D_params[key.replace(".", "-")] = generated_D[index]
@@ -132,16 +155,36 @@ if __name__ == '__main__':
 
             train_loss.backward()
             optimizer.step(gen_I=generated_I_params, gen_D=generated_D_params)
-            Gen_net_optimizer.step()
+
+            # gen_loss.backward()
+            # Gen_net_optimizer.zero_grad()
+            # KIKD_Gen_Net.zero_grad()
+            # gen_net_grad = torch.autograd.grad(gen_loss, KIKD_Gen_Net.parameters())
+            # --------------- 手动更新生成网络的参数 --------------
+            # with torch.no_grad():
+            #     for param, grad in zip(KIKD_Gen_Net.parameters(), gen_net_grad):
+                    # param -= 1e1 * grad  # 使用梯度下降更新参数
+                    # print(KIKD_Gen_Net[0].weight[8][10].item())
+            # Gen_net_optimizer.step()
+
             prec1, prec5 = accuracy(outputs.data, labels.data, topk=(1, 5))
             train_loss_log.update(train_loss.item(), images.size(0))
             train_acc_log.update(prec1[0].cpu(), images.size(0))
 
-            # print(KIKD_Gen_Net[0].weight[0][0].item())
+            # make_dot(gen_avg_loss, params=dict(KIKD_Gen_Net.named_parameters())).render("graph_gen")
+            # break
+
+        # gradient = torch.autograd.grad(
+        #             outputs=gen_avg_loss,
+        #             inputs=list(KIKD_Gen_Net.parameters()),
+        #             allow_unused=True,  # 设置 allow_unused=True
+        #             # retain_graph=True
+        #             )
+        # print(KIKD_Gen_Net.gen_fc1.weight[10][10].item(), net.fc1.weight[100][100].item())
 
         print('Epoch [%d/%d], Loss: %.4f, Acc: %.3f%%' % (epoch + 1, num_epochs, train_loss_log.avg, train_acc_log.avg))
 
-        # Test the Model
+        # ------------------------ Test the Model --------------------------------
         net.eval()
         correct = 0
         loss = 0
