@@ -53,8 +53,8 @@ class PIDOptimizer(Optimizer):
             momentum = group['momentum']
             dampening = group['dampening']
             nesterov = group['nesterov']
-            I = group['I']
-            D = group['D']
+            # I = group['I']
+            # D = group['D']
 
             for key, p in self.weight_layer.items():
             # for p in group['params']:  # p 是各个层的参数 即theta
